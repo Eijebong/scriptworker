@@ -1,5 +1,7 @@
 ---
 on:
+  push:
+    branches: []
   release:
     types: [published]
 jobs:
@@ -20,5 +22,7 @@ jobs:
         run: |
           pip install hatch
           hatch build
-      - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: check
+        run: |
+          ls
+          ls dist
