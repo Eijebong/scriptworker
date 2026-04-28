@@ -567,6 +567,45 @@ async def test_load_json_or_yaml_from_url_auth(rw_context, mocker, overwrite, fi
         assert len(called_with_auth) == 0
 
 
+@pytest.mark.asyncio
+async def test_load_json_or_yaml_from_url_dedup_concurrent(rw_context, mocker, tmpdir):
+    src = os.path.join(os.path.dirname(__file__), "data", "bad.json")
+    path = os.path.join(tmpdir, "out.json")
+    download_calls = 0
+    gate = asyncio.Event()
+
+    async def mocked_download_file(*args, **kwargs):
+        nonlocal download_calls
+        download_calls += 1
+        await gate.wait()
+        shutil.copyfile(src, path)
+
+    mocker.patch.object(utils, "download_file", new=mocked_download_file)
+    callers = [utils.load_json_or_yaml_from_url(rw_context, "", path, overwrite=False) for _ in range(5)]
+    task = asyncio.gather(*callers)
+    await asyncio.sleep(0)
+    gate.set()
+    results = await task
+    assert results == [{"credentials": ["blah"]}] * 5
+    assert download_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_load_json_or_yaml_from_url_dedup_per_path(rw_context, mocker, tmpdir):
+    src = os.path.join(os.path.dirname(__file__), "data", "bad.json")
+    paths = [os.path.join(tmpdir, "a.json"), os.path.join(tmpdir, "b.json")]
+    download_calls = 0
+
+    async def mocked_download_file(rw_context, url, abs_filename, session=None, chunk_size=128, auth=None):
+        nonlocal download_calls
+        download_calls += 1
+        shutil.copyfile(src, abs_filename)
+
+    mocker.patch.object(utils, "download_file", new=mocked_download_file)
+    await asyncio.gather(*(utils.load_json_or_yaml_from_url(rw_context, "", p, overwrite=False) for p in paths))
+    assert download_calls == 2
+
+
 # get_loggable_url {{{1
 @pytest.mark.parametrize(
     "url,expected",

@@ -758,11 +758,26 @@ async def load_json_or_yaml_from_url(context: Context, url: str, path: str, over
     else:
         file_type = "yaml"
 
+    if overwrite and os.path.exists(path):
+        return load_json_or_yaml(path, is_path=True, file_type=file_type)
+
+    inflight = getattr(context, "_inflight_loads", None)
+    if inflight is None:
+        inflight = context._inflight_loads = {}
+
+    task = inflight.get(path)
+    if task is None:
+        task = asyncio.ensure_future(_download_and_load(context, url, path, file_type, auth))
+        inflight[path] = task
+        task.add_done_callback(lambda _t, _p=path: inflight.pop(_p, None))
+    return await asyncio.shield(task)
+
+
+async def _download_and_load(context: Context, url: str, path: str, file_type: str, auth: Optional[str]) -> Dict[str, Any]:
     kwargs = {}
     if auth:
         kwargs = {"auth": auth}
-    if not overwrite or not os.path.exists(path):
-        await retry_async(download_file, args=(context, url, path), kwargs=kwargs, retry_exceptions=(DownloadError, aiohttp.ClientError, asyncio.TimeoutError))
+    await retry_async(download_file, args=(context, url, path), kwargs=kwargs, retry_exceptions=(DownloadError, aiohttp.ClientError, asyncio.TimeoutError))
     return load_json_or_yaml(path, is_path=True, file_type=file_type)
 
 
